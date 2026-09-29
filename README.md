@@ -38,10 +38,6 @@ pdf_analyst/
 tests/                       pytest suite (+ a deterministic LLM test double)
 ```
 
-`src/`, `experiments/`, `word2vec_results_app.py`, `README_WORD2VEC.md`, `ARCHITECTURE.md`, `DECISIONS.md`, `EVALUATION.md`
-and `AI_USAGE.md` belong to the earlier Word2Vec reproduction that lived in this repository. They are untouched
-(apart from renaming the old `app.py`/`README.md`/`requirements.txt`) and are not used by the PDF analyst.
-
 ## How it works
 
 ```
