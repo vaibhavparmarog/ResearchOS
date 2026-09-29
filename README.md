@@ -2,6 +2,8 @@
 
 Upload a PDF and get an AI-generated, page-referenced analysis of it.
 
+**Live demo: https://pdf-research-analyst.streamlit.app/**
+
 > **The application accepts a PDF supplied by the user at runtime and generates the analysis from that document.**
 > No PDF is bundled with the project, no PDF is processed automatically, and nothing in the code or prompts
 > depends on the content of any particular document.
