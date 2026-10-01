@@ -23,6 +23,7 @@ from .validator import PageIndex, sanitize_notes
 StageProgress = Callable[[float, str], None]
 
 MAX_REDUCE_LEVELS = 6
+FINAL_MIN_OUTPUT_TOKENS = 8000
 
 
 def _size(obj) -> int:
@@ -116,4 +117,6 @@ def write_final_report(
         # title / authors / date live at the top of page 1; keep this small for low-TPM providers
         opening = "\n\n".join(f"{page_marker(p.number)}\n{p.text}" for p in doc.text_pages[:2])[:4000]
         user = final_user_prompt_from_notes(doc, {"parts": notes} if len(notes) > 1 else notes[0], opening)
-    return client.complete_json(FINAL_SYSTEM, user, max_tokens=client.config.max_output_tokens)
+    # The final report is long and reasoning models also spend tokens thinking: start with enough
+    # room (a cut-off answer costs a whole extra call). Small-quota providers skip it instantly (413).
+    return client.complete_json(FINAL_SYSTEM, user, max_tokens=max(client.config.max_output_tokens, FINAL_MIN_OUTPUT_TOKENS))

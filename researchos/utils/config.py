@@ -145,7 +145,7 @@ class LLMConfig:
             concurrency=max(1, _int("LLM_CONCURRENCY", max(3, len(providers)))),
             json_mode=os.environ.get("LLM_JSON_MODE", "true").strip().lower() not in ("0", "false", "no"),
             retry_window=_float("LLM_RETRY_WINDOW", 240.0),
-            hedge_after=_float("LLM_HEDGE_AFTER", 40.0),
+            hedge_after=_float("LLM_HEDGE_AFTER", 25.0),
         )
 
 

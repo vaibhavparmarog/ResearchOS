@@ -71,7 +71,7 @@ On Groq every model has its own rate-limit bucket, so listing several models mul
 
 Requests are handled smartly:
 - **Load balancing** - parallel chunk requests go to the provider/model with the fewest requests in flight, so chunk 1 goes to one model and chunk 2 to another at the same time.
-- **Hedging** - if a call has not answered after `LLM_HEDGE_AFTER` seconds (default 40), the same request is also sent to an idle provider and the first answer wins.
+- **Hedging** - if a call has not answered after `LLM_HEDGE_AFTER` seconds (default 25), the same request is also sent to an idle provider and the first answer wins.
 - **Cut-off answers** are retried with a larger output budget (reasoning models spend tokens thinking).
 - **Queueing** - limited workers, queue position shown to the user, max active jobs per client, uploads per hour per IP, nginx request rate limits.
 
@@ -85,7 +85,7 @@ Requests are handled smartly:
 | `NVIDIA_MODEL` | `nvidia/nemotron-3-super-120b-a12b,openai/gpt-oss-20b` | |
 | `LLM_PROVIDERS` | `groq,openrouter,nvidia` | order (default: groq, openrouter, nvidia, openai, anthropic) |
 | `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_PROVIDER` | | one generic OpenAI-compatible (or `anthropic`) provider, tried first |
-| `LLM_CONCURRENCY` / `LLM_MAX_OUTPUT_TOKENS` / `LLM_TIMEOUT` / `LLM_RETRY_WINDOW` / `LLM_HEDGE_AFTER` | `6` / `4000` / `120` / `240` / `40` | concurrency defaults to the number of provider/model slots |
+| `LLM_CONCURRENCY` / `LLM_MAX_OUTPUT_TOKENS` / `LLM_TIMEOUT` / `LLM_RETRY_WINDOW` / `LLM_HEDGE_AFTER` | `6` / `4000` / `120` / `240` / `25` | concurrency defaults to the number of provider/model slots |
 | `SINGLE_PASS_CHARS` / `CHUNK_CHARS` / `NOTES_BUDGET_CHARS` | `45000` / `9000` / `9000` | whole papers go in one call to a provider that accepts the size |
 | `MAX_PDF_MB` / `MAX_PDF_PAGES` | `25` / `300` | |
 | `OCR_MODE` / `OCR_DPI` / `MAX_OCR_PAGES` / `OCR_LANGUAGE` | `auto` / `150` / `60` / `eng` | OCR needs Tesseract (included in the Docker image) |
