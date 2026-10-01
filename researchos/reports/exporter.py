@@ -6,8 +6,7 @@ import io
 import json
 import re
 
-import markdown as _markdown
-
+from ..utils.safe_markdown import safe_markdown
 from ..utils.text import format_pages
 from .models import Report
 
@@ -111,7 +110,7 @@ def to_pdf(r: Report) -> bytes:
     """Render the report to PDF with PyMuPDF's HTML layout engine."""
     import pymupdf as fitz
 
-    html = _markdown.markdown(to_markdown(r), extensions=["tables", "sane_lists"])
+    html = safe_markdown(to_markdown(r))      # never let report content inject HTML into the PDF engine
     story = fitz.Story(html=html, user_css=_PDF_CSS)
     stream = io.BytesIO()
     writer = fitz.DocumentWriter(stream)
