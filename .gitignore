@@ -17,7 +17,9 @@ dist/
 build/
 
 .env
+.env.*
+!.env.example
 .pytest_cache/
 
-
-.streamlit/secrets.toml
+# personal notes, never committed
+codebase_guide.md
