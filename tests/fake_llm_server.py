@@ -1,6 +1,6 @@
 """Local OpenAI-compatible HTTP server backed by tests/fake_llm.py.
 
-Lets the real LLMClient / Streamlit app be exercised end to end without an API key or network.
+Lets the real LLMClient and the web app be exercised end to end without an API key or network.
 For pipeline verification ONLY: the answers are mechanical extracts of the prompt, not analysis.
 
     python -m tests.fake_llm_server [port]      # then set LLM_BASE_URL=http://127.0.0.1:<port>/v1
