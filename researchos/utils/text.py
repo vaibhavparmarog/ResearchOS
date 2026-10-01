@@ -15,9 +15,14 @@ _QUOTES = {
 _LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl"}
 
 
+_DETACHED_ACCENT = re.compile(r"(?<=\w) ?([̀-ͯ])([A-Za-z])")
+
+
 def normalize_chars(text: str) -> str:
-    """Unify unicode quirks that PDFs commonly introduce (ligatures, smart quotes, NBSP)."""
+    """Unify unicode quirks that PDFs commonly introduce (ligatures, smart quotes, NBSP, detached accents)."""
     text = unicodedata.normalize("NFKC", text)
+    # LaTeX PDFs often store "é" as a spacing accent before the letter ("D ́epartement"): re-attach it.
+    text = _DETACHED_ACCENT.sub(lambda m: unicodedata.normalize("NFC", m.group(2) + m.group(1)), text)
     for src, dst in {**_QUOTES, **_LIGATURES}.items():
         text = text.replace(src, dst)
     # drop control characters except newline / tab
