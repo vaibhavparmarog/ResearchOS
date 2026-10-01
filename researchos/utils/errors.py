@@ -45,6 +45,10 @@ class TooManyPagesError(PDFError):
     user_message = "The PDF has too many pages."
 
 
+class CancelledError(AnalystError):
+    user_message = "The analysis was cancelled."
+
+
 # ---- LLM -------------------------------------------------------------------
 class LLMError(AnalystError):
     user_message = "The AI service failed to produce a response."

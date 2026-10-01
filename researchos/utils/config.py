@@ -108,6 +108,7 @@ class LLMConfig:
     concurrency: int = 3
     json_mode: bool = True
     retry_window: float = 240.0     # seconds a single call may keep waiting out rate limits
+    hedge_after: float = 0.0        # >0: duplicate a slow call on another provider after N seconds
 
     @property
     def model(self) -> str:
@@ -144,6 +145,7 @@ class LLMConfig:
             concurrency=max(1, _int("LLM_CONCURRENCY", max(3, len(providers)))),
             json_mode=os.environ.get("LLM_JSON_MODE", "true").strip().lower() not in ("0", "false", "no"),
             retry_window=_float("LLM_RETRY_WINDOW", 240.0),
+            hedge_after=_float("LLM_HEDGE_AFTER", 40.0),
         )
 
 

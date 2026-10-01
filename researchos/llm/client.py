@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import queue
 import re
 import threading
 import time
@@ -25,6 +26,7 @@ import httpx
 
 from ..utils.config import LLMConfig, ProviderConfig
 from ..utils.errors import (
+    CancelledError,
     LLMConfigError,
     LLMError,
     LLMRateLimitError,
@@ -116,7 +118,12 @@ class ProviderPool:
 
 
 class LLMClient:
-    def __init__(self, config: LLMConfig | None = None, pool: ProviderPool | None = None):
+    def __init__(
+        self,
+        config: LLMConfig | None = None,
+        pool: ProviderPool | None = None,
+        cancel_event: threading.Event | None = None,
+    ):
         self.config = pool.config if pool else (config or LLMConfig.from_env())
         self._own_pool = pool is None
         self._pool = pool or ProviderPool(self.config)
@@ -124,6 +131,7 @@ class LLMClient:
         self._lock = self._pool.lock
         self._http = self._pool.http
         self._used: dict[str, int] = {}
+        self._cancel = cancel_event or threading.Event()
         self.calls = 0
 
     @property
@@ -131,11 +139,60 @@ class LLMClient:
         """Provider:model pairs that answered calls made through THIS client."""
         return [f"{s.cfg.name}:{s.cfg.model}" for s in self._states if self._used.get(s.cfg.name)]
 
+    def _check_cancel(self) -> None:
+        if self._cancel.is_set():
+            raise CancelledError()
+
+    def _sleep(self, seconds: float) -> None:
+        """Sleep that wakes up immediately when the job is cancelled."""
+        if self._cancel.wait(timeout=max(0.0, seconds)):
+            raise CancelledError()
+
     # ------------------------------------------------------------------ public
     def complete(self, system: str, user: str, *, want_json: bool = False, max_tokens: int | None = None) -> str:
+        self._check_cancel()
         with self._lock:
             self.calls += 1
-        return self._with_failover(system, user, want_json, max_tokens or self.config.max_output_tokens)
+        max_tokens = max_tokens or self.config.max_output_tokens
+        usable = sum(s.disabled is None for s in self._states)
+        if self.config.hedge_after <= 0 or usable < 2:
+            return self._with_failover(system, user, want_json, max_tokens)
+        return self._hedged(system, user, want_json, max_tokens)
+
+    def _hedged(self, system: str, user: str, want_json: bool, max_tokens: int) -> str:
+        """Run the call; if it has not answered after `hedge_after` seconds, send the same request
+        to a second provider (load balancing picks a different one) and take whichever answers
+        first. Removes the long tail when one provider is slow; costs tokens only for slow calls."""
+        results: queue.Queue = queue.Queue()
+
+        def run() -> None:
+            try:
+                results.put((True, self._with_failover(system, user, want_json, max_tokens)))
+            except BaseException as exc:      # noqa: BLE001 - forwarded to the caller
+                results.put((False, exc))
+
+        threading.Thread(target=run, daemon=True, name="llm-call").start()
+        started, pending, first_error = 1, 1, None
+        deadline_hedge = time.monotonic() + self.config.hedge_after
+        while True:
+            timeout = None if started > 1 else max(0.0, deadline_hedge - time.monotonic())
+            try:
+                ok, value = results.get(timeout=timeout)
+            except queue.Empty:
+                self._check_cancel()
+                log.info("call slower than %.0fs; hedging on another provider", self.config.hedge_after)
+                threading.Thread(target=run, daemon=True, name="llm-hedge").start()
+                started += 1
+                pending += 1
+                continue
+            pending -= 1
+            if ok:
+                return value
+            if isinstance(value, CancelledError):
+                raise value
+            first_error = first_error or value
+            if pending == 0:
+                raise first_error
 
     def complete_json(self, system: str, user: str, *, max_tokens: int | None = None) -> dict:
         raw = self.complete(system, user, want_json=True, max_tokens=max_tokens)
@@ -220,9 +277,10 @@ class LLMClient:
         """One attempt on one provider. Raises _Retry (try again) or _GiveUp (stop now)."""
         if time.monotonic() + wait > deadline and isinstance(last, LLMRateLimitError):
             raise _GiveUp()
+        self._check_cancel()
         if wait > 0:
             log.info("All providers cooling down; waiting %.1fs for %s", wait, state.cfg.name)
-            time.sleep(min(wait, MAX_WAIT_SECONDS))
+            self._sleep(min(wait, MAX_WAIT_SECONDS))
         name = state.cfg.name
         try:
             text = self._request(state, system, user, want_json, max_tokens)

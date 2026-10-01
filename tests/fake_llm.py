@@ -147,13 +147,19 @@ def fake_respond(system: str, user: str, hallucinate: bool = False) -> str:
 class FakeLLMClient:
     """Drop-in for LLMClient.complete_json used by unit tests (records every prompt it saw)."""
 
-    def __init__(self, hallucinate: bool = False):
+    def __init__(self, hallucinate: bool = False, cancel_event=None, delay: float = 0.0):
         self.config = SimpleNamespace(concurrency=2, model="fake-llm", max_output_tokens=4096)
         self.hallucinate = hallucinate
+        self.cancel_event = cancel_event
+        self.delay = delay
         self.calls = 0
         self.prompts: list[tuple[str, str]] = []
 
     def complete_json(self, system: str, user: str, *, max_tokens: int | None = None) -> dict:
+        from researchos.utils.errors import CancelledError
+
+        if self.cancel_event is not None and self.cancel_event.wait(self.delay):
+            raise CancelledError()
         self.calls += 1
         self.prompts.append((system, user))
         return json.loads(fake_respond(system, user, self.hallucinate))
