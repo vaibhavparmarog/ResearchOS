@@ -14,8 +14,15 @@ page-referenced analysis of **that document only**.
 2. The server validates it and extracts the text page by page, in proper reading order (two-column papers included), using OCR when a page has no usable text layer.
 3. The text goes through an LLM pipeline (single pass for short documents, map-reduce for long ones).
 4. Every page reference, quote, metric, title and author in the model's output is **checked against the PDF** before it is shown.
-5. You read the report (collapsible sections, verified quotes, metric cards, source list) and download it as Markdown, TXT, PDF or JSON.
-6. **Upload another PDF** discards the previous analysis completely.
+5. You read the report (contents sidebar, verified quotes, key numbers, source list) and download it as PDF, Markdown, TXT or JSON.
+6. **Cancel** stops a running analysis on the server immediately; **New PDF** discards everything about the previous one.
+
+## Privacy: nothing is stored
+
+- Nothing is written to disk: the container filesystem is read-only, uploads are spooled in RAM (`tmpfs`), nginx access logs are off.
+- The PDF bytes are dropped as soon as the text is extracted, the extracted text as soon as the report exists.
+- The finished report is sent to the browser once and purged from server memory ~30 s later; exports are rendered from the copy the browser sends back (`POST /api/export/{fmt}`), so the server never has to keep it.
+- If the browser tab is closed, the analysis is cancelled (beacon on page hide, plus a heartbeat timeout).
 
 ## Architecture
 
@@ -34,11 +41,11 @@ researchos/
 │   └── validator.py      grounding checks against the PDF
 ├── reports/              generator (orchestration), models, exporters (MD/TXT/JSON/PDF)
 ├── web/
-│   ├── api.py            FastAPI: upload, job status, exports, static frontend, security headers
-│   ├── jobs.py           in-memory job queue, per-IP upload limit, TTL clean-up
-│   ├── render.py         safe Markdown -> HTML for LLM output
+│   ├── api.py            FastAPI: upload, status, cancel, stateless exports, static frontend, security headers
+│   ├── jobs.py           in-memory jobs: cancel, heartbeat, one-time delivery + purge, queue
+│   ├── render.py         report -> JSON for the browser
 │   └── static/           index.html, app.js, styles.css (no framework, no CDN)
-└── utils/                env config, error types, text helpers
+└── utils/                env config, error types, text helpers, safe Markdown renderer
 deploy/                   nginx site config, EC2 setup script
 Dockerfile, docker-compose.yml
 tests/                    pytest suite (+ deterministic LLM test double)
@@ -62,6 +69,12 @@ the call moves to the next provider immediately and the limited one cools down f
 Invalid keys / no credit / unknown model disable that provider; "request too large" skips it for that call.
 On Groq every model has its own rate-limit bucket, so listing several models multiplies throughput.
 
+Requests are handled smartly:
+- **Load balancing** - parallel chunk requests go to the provider/model with the fewest requests in flight, so chunk 1 goes to one model and chunk 2 to another at the same time.
+- **Hedging** - if a call has not answered after `LLM_HEDGE_AFTER` seconds (default 40), the same request is also sent to an idle provider and the first answer wins.
+- **Cut-off answers** are retried with a larger output budget (reasoning models spend tokens thinking).
+- **Queueing** - limited workers, queue position shown to the user, max active jobs per client, uploads per hour per IP, nginx request rate limits.
+
 | Variable | Example | Notes |
 |---|---|---|
 | `GROQ_API_KEY` | `gsk_...` | |
@@ -72,12 +85,12 @@ On Groq every model has its own rate-limit bucket, so listing several models mul
 | `NVIDIA_MODEL` | `nvidia/nemotron-3-super-120b-a12b,openai/gpt-oss-20b` | |
 | `LLM_PROVIDERS` | `groq,openrouter,nvidia` | order (default: groq, openrouter, nvidia, openai, anthropic) |
 | `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_PROVIDER` | | one generic OpenAI-compatible (or `anthropic`) provider, tried first |
-| `LLM_CONCURRENCY` / `LLM_MAX_OUTPUT_TOKENS` / `LLM_TIMEOUT` / `LLM_RETRY_WINDOW` | `3` / `3500` / `120` / `240` | |
-| `SINGLE_PASS_CHARS` / `CHUNK_CHARS` / `NOTES_BUDGET_CHARS` | `10000` / `6000` / `5000` | keep small on free tiers (8k tokens/min) |
+| `LLM_CONCURRENCY` / `LLM_MAX_OUTPUT_TOKENS` / `LLM_TIMEOUT` / `LLM_RETRY_WINDOW` / `LLM_HEDGE_AFTER` | `6` / `4000` / `120` / `240` / `40` | concurrency defaults to the number of provider/model slots |
+| `SINGLE_PASS_CHARS` / `CHUNK_CHARS` / `NOTES_BUDGET_CHARS` | `45000` / `9000` / `9000` | whole papers go in one call to a provider that accepts the size |
 | `MAX_PDF_MB` / `MAX_PDF_PAGES` | `25` / `300` | |
 | `OCR_MODE` / `OCR_DPI` / `MAX_OCR_PAGES` / `OCR_LANGUAGE` | `auto` / `150` / `60` / `eng` | OCR needs Tesseract (included in the Docker image) |
 | `SKIP_REFERENCES` | `true` | keep the bibliography out of the LLM input |
-| `JOB_WORKERS` / `JOBS_PER_IP_PER_HOUR` / `MAX_PENDING_JOBS` / `JOB_TTL_SECONDS` | `2` / `30` / `20` / `7200` | server limits |
+| `JOB_WORKERS` / `JOBS_PER_IP_PER_HOUR` / `MAX_PENDING_JOBS` / `MAX_ACTIVE_JOBS_PER_IP` | `2` / `30` / `20` / `2` | server limits |
 
 Secrets go in `.env` (git-ignored, excluded from the Docker build context). See `.env.example`.
 
