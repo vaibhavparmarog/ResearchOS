@@ -221,6 +221,8 @@ class JobManager:
             job.doc_info = _doc_info(document)
             self._progress(job, "analyzing", 0.15, "Starting the analysis")
             client = self._client_factory(job.cancel)
+            if hasattr(client, "on_status"):
+                client.on_status = lambda m: self._progress(job, message=m)   # live "what is happening" for the UI
             report = generate_report(
                 document, client, limits,
                 lambda f, m: self._progress(job, progress=0.15 + 0.85 * f, message=m),

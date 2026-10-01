@@ -5,7 +5,8 @@
 
 const $ = (id) => document.getElementById(id);
 const OPEN_BY_DEFAULT = new Set(["executive_summary", "key_findings", "key_takeaways"]);
-const state = { job: null, file: null, timer: null, started: 0, reportData: null, maxMb: 25 };
+const state = { job: null, file: null, timer: null, started: 0, reportData: null, maxMb: 25,
+  ticker: null, shown: 0, server: 0, status: "queued", msgSince: 0, msg: "" };
 
 function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -92,6 +93,9 @@ async function start(file) {
   state.file = file;
   state.started = Date.now();
   state.reportData = null;
+  state.shown = 0;
+  state.server = 0;
+  startTicker();
   showView("job");
   $("report-layout").hidden = true;
   $("report").replaceChildren();
@@ -136,6 +140,7 @@ function poll(delay = 1200) {
 
 async function stopCurrent() {
   clearTimeout(state.timer);
+  stopTicker();
   const id = state.job;
   state.job = null;
   if (id) { try { await fetch(`/api/jobs/${id}/cancel`, { method: "POST" }); } catch (_) { /* ignore */ } }
@@ -167,12 +172,35 @@ function setProgress(status, fraction, message) {
     li.classList.toggle("done", i < step);
     li.classList.toggle("active", i === step);
   });
-  $("p-bar").style.width = `${Math.round(Math.max(0.02, Math.min(1, fraction)) * 100)}%`;
-  $("p-msg").textContent = message || "";
+  state.status = status;
+  state.server = fraction;
+  state.shown = Math.max(state.shown, fraction);
+  if (message !== state.msg) { state.msg = message || ""; state.msgSince = Date.now(); }
+  draw();
+}
+
+// Runs every second while a job is active: ticking timer, a bar that keeps moving gently during
+// long AI calls (never past the next real milestone), and a reassurance note for slow steps.
+function tick() {
+  if (state.status === "analyzing" || state.status === "reading") {
+    const ceiling = Math.min(0.97, state.server + (state.server < 0.8 ? 0.12 : 0.08));
+    state.shown = Math.min(ceiling, state.shown + (ceiling - state.shown) * 0.03);
+  }
+  draw();
+}
+
+function draw() {
+  $("p-bar").style.width = `${Math.round(Math.max(0.02, Math.min(1, state.shown)) * 100)}%`;
+  const slow = Date.now() - state.msgSince > 20000 && ["analyzing", "reading"].includes(state.status);
+  $("p-msg").textContent = state.msg + (slow ? " · still working, long papers can take a couple of minutes (keep this tab open)" : "");
   $("p-time").textContent = state.started ? elapsed() : "";
 }
 
+function startTicker() { clearInterval(state.ticker); state.ticker = setInterval(tick, 1000); }
+function stopTicker() { clearInterval(state.ticker); state.ticker = null; }
+
 function fail(message, retryable) {
+  stopTicker();
   $("progress-card").hidden = true;
   $("cancel").hidden = true;
   $("another").hidden = false;
@@ -196,6 +224,7 @@ function render(job) {
   if (job.status === "error") return fail(job.error, !job.error_is_config);
   setProgress(job.status, job.progress, job.message);
   if (job.status === "done" && job.report) {
+    stopTicker();
     state.reportData = job.report_data;          // kept only in this tab; the server has deleted it
     $("progress-card").hidden = true;
     $("cancel").hidden = true;

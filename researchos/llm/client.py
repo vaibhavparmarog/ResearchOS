@@ -21,6 +21,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import Callable
 
 import httpx
 
@@ -133,6 +134,16 @@ class LLMClient:
         self._used: dict[str, int] = {}
         self._cancel = cancel_event or threading.Event()
         self.calls = 0
+        self.on_status: Callable[[str], None] | None = None     # live status for the UI
+
+    def _status(self, message: str) -> None:
+        if self.on_status:
+            try:
+                self.on_status(message)
+            except CancelledError:
+                raise
+            except Exception:
+                pass
 
     @property
     def models_used(self) -> list[str]:
@@ -181,6 +192,7 @@ class LLMClient:
             except queue.Empty:
                 self._check_cancel()
                 log.info("call slower than %.0fs; hedging on another provider", self.config.hedge_after)
+                self._status("The AI is taking a while; asking a second AI provider in parallel")
                 threading.Thread(target=run, daemon=True, name="llm-hedge").start()
                 started += 1
                 pending += 1
@@ -260,6 +272,7 @@ class LLMClient:
                     # Reasoning models spend part of the budget thinking: give them more room.
                     max_tokens = min(max_tokens * 2, MAX_OUTPUT_CAP)
                     log.info("%s: output cut off; retrying with max_tokens=%d", state.cfg.name, max_tokens)
+                    self._status("The AI's answer was cut off; retrying with more room")
                     continue
                 if r.skip:
                     call.skipped.add(state.cfg.name)
@@ -280,12 +293,14 @@ class LLMClient:
         self._check_cancel()
         if wait > 0:
             log.info("All providers cooling down; waiting %.1fs for %s", wait, state.cfg.name)
+            self._status(f"All AI providers are busy; retrying in {max(1, round(wait))}s")
             self._sleep(min(wait, MAX_WAIT_SECONDS))
         name = state.cfg.name
         try:
             text = self._request(state, system, user, want_json, max_tokens)
         except _RateLimited as exc:
             self._cool(state, max(exc.delay, MIN_RATE_LIMIT_COOLDOWN), "rate limited")
+            self._status("An AI provider is busy; switching to another one")
             raise _Retry(exc.error, failed=True)
         except _Transient as exc:
             self._cool(state, exc.delay, "temporary error")
