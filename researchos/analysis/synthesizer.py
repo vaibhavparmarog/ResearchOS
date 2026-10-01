@@ -109,10 +109,11 @@ def write_final_report(
     notes: list[dict] | None,
 ) -> dict:
     """Final synthesis. `notes=None` means single-pass over the whole (short) document."""
-    valid_pages = [p.number for p in doc.text_pages]
+    valid_pages = [p.number for p in doc.analysis_pages]
     if notes is None:
         user = final_user_prompt_from_text(doc, full_text(doc), valid_pages)
     else:
-        opening = "\n\n".join(f"{page_marker(p.number)}\n{p.text}" for p in doc.text_pages[:2])[:6000]
+        # title / authors / date live at the top of page 1; keep this small for low-TPM providers
+        opening = "\n\n".join(f"{page_marker(p.number)}\n{p.text}" for p in doc.text_pages[:2])[:4000]
         user = final_user_prompt_from_notes(doc, {"parts": notes} if len(notes) > 1 else notes[0], opening)
     return client.complete_json(FINAL_SYSTEM, user, max_tokens=client.config.max_output_tokens)

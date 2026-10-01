@@ -48,7 +48,8 @@ Return JSON with this shape (use empty lists when the excerpt has nothing for a 
   "data": [{{"label": "what is measured", "value": "the number/value exactly as written", "context": "brief context", "pages": [int]}}],
   "limitations_stated": [{{"text": "limitation/caveat the document itself states", "pages": [int]}}]
 }}
-Only include items that are genuinely present in this excerpt. Prefer 5-15 high-value points over exhaustive lists."""
+Only include items that are genuinely present in this excerpt.
+HARD LIMITS (keep the whole answer under ~1200 words): at most 12 points, 8 concepts, 10 data items, 5 limitations; each text field at most 2 sentences."""
 
 CONDENSE_SYSTEM = f"""TASK: CONDENSE_NOTES
 You merge several sets of structured notes (each about a different part of the SAME document) into ONE set of notes of the same shape, shorter than the inputs combined. Remove duplicates, keep the most important items, and preserve every item's page numbers and verbatim quotes exactly as given. Do not add information that is not in the notes. Never invent page numbers.
@@ -61,7 +62,8 @@ Return JSON with this shape:
   "concepts": [{{"term": "...", "explanation": "...", "pages": [int]}}],
   "data": [{{"label": "...", "value": "...", "context": "...", "pages": [int]}}],
   "limitations_stated": [{{"text": "...", "pages": [int]}}]
-}}"""
+}}
+HARD LIMITS (keep the whole answer under ~1200 words): at most 15 points, 10 concepts, 12 data items, 6 limitations; each text field at most 2 sentences."""
 
 FINAL_SYSTEM = f"""TASK: FINAL_REPORT
 You are a senior analyst writing a professional, adaptive report about the document described below. Structure the report around what THIS document actually is and contains; do not force it into a research-paper template. Omit any section that does not apply.
@@ -91,17 +93,24 @@ Return JSON with this shape:
   "metrics": [{{"label": "...", "value": "value exactly as written in the document", "pages": [int]}}],
   "not_stated": ["overview items or topics the document does not state, e.g. \\"Authors\\""]
 }}
-"metrics" lists important numbers/data points from the document (max 12); leave it empty if the document contains none."""
+"metrics" lists important numbers/data points from the document (max 12); leave it empty if the document contains none.
+Keep the whole answer under ~1800 words so it is never cut off; prefer depth in key_findings and detailed_analysis over length elsewhere."""
 
 
 def describe_document(doc: ExtractedDocument) -> str:
     meta = ", ".join(f"{k}={v!r}" for k, v in doc.metadata.items() if k in ("title", "author", "creationDate", "subject"))
     heads = "; ".join(f"{h.text} (p.{h.page})" for h in doc.headings[:40])
+    notes = []
+    if doc.reference_pages:
+        notes.append(f"The bibliography (pages {doc.reference_pages[0]}-{doc.reference_pages[-1]}) is omitted from the text below.")
+    if doc.ocr_pages:
+        notes.append(f"Pages {doc.ocr_pages[:20]} were read with OCR and may contain recognition errors; do not quote garbled text.")
     return (
         f"Filename: {doc.filename}\nTotal pages: {doc.page_count} "
         f"(pages with extractable text: {len(doc.text_pages)})\n"
         f"Embedded PDF metadata (may be missing or wrong): {meta or 'none'}\n"
         f"Detected headings/outline: {heads or 'none detected'}"
+        + ("\n" + " ".join(notes) if notes else "")
     )
 
 

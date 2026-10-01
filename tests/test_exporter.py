@@ -2,9 +2,9 @@
 
 import pymupdf
 
-from pdf_analyst.pdf.extractor import extract_pdf
-from pdf_analyst.reports import exporter
-from pdf_analyst.reports.generator import generate_report
+from researchos.pdf.extractor import extract_pdf
+from researchos.reports import exporter
+from researchos.reports.generator import generate_report
 
 from .fake_llm import FakeLLMClient
 

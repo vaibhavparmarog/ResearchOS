@@ -1,9 +1,9 @@
 """The validator must neutralise fabricated pages, quotes, authors and metrics."""
 
-from pdf_analyst.pdf.extractor import extract_pdf
-from pdf_analyst.reports.exporter import to_markdown
-from pdf_analyst.reports.generator import generate_report
-from pdf_analyst.utils.text import match_form
+from researchos.pdf.extractor import extract_pdf
+from researchos.reports.exporter import to_markdown
+from researchos.reports.generator import generate_report
+from researchos.utils.text import match_form
 
 from .fake_llm import FakeLLMClient
 

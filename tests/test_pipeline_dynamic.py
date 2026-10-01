@@ -2,10 +2,10 @@
 
 import re
 
-from pdf_analyst.pdf.extractor import extract_pdf
-from pdf_analyst.reports.exporter import to_markdown
-from pdf_analyst.reports.generator import generate_report
-from pdf_analyst.utils.text import match_form
+from researchos.pdf.extractor import extract_pdf
+from researchos.reports.exporter import to_markdown
+from researchos.reports.generator import generate_report
+from researchos.utils.text import match_form
 
 from .conftest import PDF_A_PAGES, PDF_B_PAGES
 from .fake_llm import FakeLLMClient
@@ -107,7 +107,7 @@ def test_long_pdf_uses_map_reduce_and_keeps_page_provenance(limits):
 
 
 def test_fit_notes_bounds_size_so_reduction_converges():
-    from pdf_analyst.analysis.synthesizer import _size, fit_notes
+    from researchos.analysis.synthesizer import _size, fit_notes
 
     big = {"summary": "s" * 50, "topics": [], "concepts": [{"term": "t", "explanation": "e" * 200, "pages": [1]}] * 30,
            "points": [{"text": "p" * 300, "kind": "claim", "pages": [1]}] * 60, "data": [], "limitations_stated": []}

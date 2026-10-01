@@ -15,7 +15,7 @@ from ..analysis.analyzer import analyze_chunks
 from ..analysis.synthesizer import reduce_notes, write_final_report
 from ..analysis.validator import validate_report
 from ..llm.client import LLMClient
-from ..pdf.chunker import chunk_document
+from ..pdf.chunker import analysis_chars, chunk_document
 from ..pdf.extractor import ExtractedDocument, extract_pdf
 from ..utils.config import Limits
 from .models import Report
@@ -26,9 +26,11 @@ log = logging.getLogger(__name__)
 Progress = Callable[[float, str], None]
 
 
-def extract_document(data: bytes | None, filename: str, limits: Limits | None = None) -> ExtractedDocument:
-    """Stage 1 only (fast, no LLM). Lets the UI show file facts before analysis starts."""
-    return extract_pdf(data, filename, limits)
+def extract_document(
+    data: bytes | None, filename: str, limits: Limits | None = None, on_progress: Progress | None = None
+) -> ExtractedDocument:
+    """Stage 1 only (no LLM). Lets the UI show file facts before analysis starts. OCR reports progress."""
+    return extract_pdf(data, filename, limits, on_progress=on_progress)
 
 
 def generate_report(
@@ -46,7 +48,7 @@ def generate_report(
 
     say(0.05, "Splitting the document into page-aware chunks")
     chunks = chunk_document(doc, limits)
-    single_pass = doc.total_chars <= limits.single_pass_chars or len(chunks) <= 1
+    single_pass = analysis_chars(doc) <= limits.single_pass_chars or len(chunks) <= 1
     notes = None
 
     if not single_pass:
@@ -63,7 +65,7 @@ def generate_report(
 
     say(0.92, "Verifying page references and quotes against the PDF")
     meta = {
-        "model": client.config.model,
+        "model": ", ".join(getattr(client, "models_used", None) or [client.config.model]),
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "strategy": "single-pass" if single_pass else "map-reduce",
         "chunks": len(chunks),
