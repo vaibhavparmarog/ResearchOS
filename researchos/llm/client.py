@@ -1,8 +1,15 @@
-"""Thin LLM client (OpenAI-compatible chat API, or Anthropic Messages API) built on httpx.
+"""LLM client with multi-provider failover, built on httpx.
 
-Configured only through environment variables (see utils/config.py). Handles timeouts,
-rate limits, transient 5xx errors, and malformed JSON, and maps every failure onto an
-LLMError subclass with a user-safe message.
+Providers (Groq, OpenRouter, NVIDIA, OpenAI, Anthropic or any OpenAI-compatible endpoint) are
+configured through environment variables (see utils/config.py) and tried in order:
+
+- 429 / rate limit  -> that provider cools down for the time it asks for; the call moves on to
+                       the next provider immediately (no waiting while another one is free)
+- 413 / too large   -> skip that provider for this call (e.g. a small tokens-per-minute tier)
+- 5xx / network     -> short cool-down, try the next provider
+- 401/403/402/404   -> the provider is disabled for this client (bad key, no credit, bad model)
+
+Every failure surfaces as an LLMError subclass with a user-safe message.
 """
 
 from __future__ import annotations
@@ -10,11 +17,13 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
 import time
+from dataclasses import dataclass, field
 
 import httpx
 
-from ..utils.config import LLMConfig
+from ..utils.config import LLMConfig, ProviderConfig
 from ..utils.errors import (
     LLMConfigError,
     LLMError,
@@ -25,10 +34,15 @@ from ..utils.errors import (
 
 log = logging.getLogger(__name__)
 
+MAX_WAIT_SECONDS = 65.0
+MIN_RATE_LIMIT_COOLDOWN = 2.0
+MAX_OUTPUT_CAP = 12000            # ceiling when retrying a cut-off answer with a bigger budget
+_THINK = re.compile(r"<think>.*?</think>", re.S | re.I)
+
 
 def extract_json(text: str) -> dict:
-    """Parse a JSON object from model output, tolerating code fences and surrounding prose."""
-    text = text.strip()
+    """Parse a JSON object from model output, tolerating code fences, <think> blocks and prose."""
+    text = _THINK.sub("", text).strip()
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text, flags=re.I)
     try:
         value = json.loads(text)
@@ -42,17 +56,86 @@ def extract_json(text: str) -> dict:
     return value
 
 
+@dataclass
+class _ProviderState:
+    cfg: ProviderConfig
+    json_mode: bool = True
+    cooldown_until: float = 0.0
+    disabled: LLMError | None = None
+    calls: int = 0
+    in_flight: int = 0
+
+
+class _RateLimited(Exception):
+    def __init__(self, error: LLMError, delay: float):
+        self.error, self.delay = error, delay
+
+
+class _Transient(Exception):
+    def __init__(self, error: LLMError, delay: float = 3.0):
+        self.error, self.delay = error, delay
+
+
+class _TooLarge(Exception):
+    def __init__(self, error: LLMError, truncated: bool = False):
+        self.error, self.truncated = error, truncated
+
+
+class _Retry(Exception):
+    """Outcome of a failed attempt: how much it costs and whether to avoid that provider."""
+
+    def __init__(self, error: LLMError, cost: int = 0, skip: bool = False, failed: bool = False, truncated: bool = False):
+        self.error, self.cost, self.skip, self.failed, self.truncated = error, cost, skip, failed, truncated
+
+
+class _GiveUp(Exception):
+    pass
+
+
+@dataclass
+class _CallState:
+    skipped: set[str] = field(default_factory=set)   # unusable for this call (request too large)
+    failed: set[str] = field(default_factory=set)    # already failed during this call
+
+
+class ProviderPool:
+    """Provider health (cool-downs, disabled keys) and the HTTP connection pool.
+
+    Share one pool between all clients in a server process so a rate limit seen by one job is
+    respected by the next.
+    """
+
+    def __init__(self, config: LLMConfig):
+        self.config = config
+        self.states = [_ProviderState(p, json_mode=config.json_mode) for p in config.providers]
+        self.lock = threading.Lock()
+        self.http = httpx.Client(timeout=httpx.Timeout(config.timeout, connect=15.0))
+
+    def close(self) -> None:
+        self.http.close()
+
+
 class LLMClient:
-    def __init__(self, config: LLMConfig | None = None):
-        self.config = config or LLMConfig.from_env()
-        self._json_mode = self.config.json_mode
-        self._http = httpx.Client(timeout=httpx.Timeout(self.config.timeout, connect=15.0))
+    def __init__(self, config: LLMConfig | None = None, pool: ProviderPool | None = None):
+        self.config = pool.config if pool else (config or LLMConfig.from_env())
+        self._own_pool = pool is None
+        self._pool = pool or ProviderPool(self.config)
+        self._states = self._pool.states
+        self._lock = self._pool.lock
+        self._http = self._pool.http
+        self._used: dict[str, int] = {}
         self.calls = 0
+
+    @property
+    def models_used(self) -> list[str]:
+        """Provider:model pairs that answered calls made through THIS client."""
+        return [f"{s.cfg.name}:{s.cfg.model}" for s in self._states if self._used.get(s.cfg.name)]
 
     # ------------------------------------------------------------------ public
     def complete(self, system: str, user: str, *, want_json: bool = False, max_tokens: int | None = None) -> str:
-        self.calls += 1
-        return self._with_retries(system, user, want_json, max_tokens or self.config.max_output_tokens)
+        with self._lock:
+            self.calls += 1
+        return self._with_failover(system, user, want_json, max_tokens or self.config.max_output_tokens)
 
     def complete_json(self, system: str, user: str, *, max_tokens: int | None = None) -> dict:
         raw = self.complete(system, user, want_json=True, max_tokens=max_tokens)
@@ -72,116 +155,215 @@ class LLMClient:
         except json.JSONDecodeError as exc:
             raise LLMResponseError(detail=f"unparseable JSON after repair: {repair[:300]!r}") from exc
 
-    # ---------------------------------------------------------------- internals
-    def _with_retries(self, system: str, user: str, want_json: bool, max_tokens: int) -> str:
-        cfg = self.config
-        last: Exception | None = None
-        for attempt in range(cfg.max_retries + 1):
+    # ---------------------------------------------------------------- failover
+    def _pick(self, call: _CallState) -> tuple[_ProviderState | None, float]:
+        """Provider for the next attempt and how long to wait for it (0 = ready now).
+
+        Load-balances parallel calls: among ready providers it takes the one with the fewest
+        requests in flight (ties -> configured order), so concurrent chunks are spread over
+        different providers/models instead of all queuing on the first one. The chosen
+        provider's in-flight count is reserved here and released by the caller.
+        """
+        with self._lock:
+            usable = [s for s in self._states if s.disabled is None and s.cfg.name not in call.skipped]
+            if not usable:
+                return None, 0.0
+            now = time.monotonic()
+            ready = [s for s in usable if s.cooldown_until <= now]
+            fresh = [s for s in ready if s.cfg.name not in call.failed]
+            pool = fresh or ready
+            if pool:
+                order = {id(s): i for i, s in enumerate(self._states)}
+                chosen = min(pool, key=lambda s: (s.in_flight, order[id(s)]))
+                chosen.in_flight += 1
+                return chosen, 0.0
+            soonest = min(usable, key=lambda s: s.cooldown_until)
+            soonest.in_flight += 1
+            return soonest, soonest.cooldown_until - now
+
+    def _with_failover(self, system: str, user: str, want_json: bool, max_tokens: int) -> str:
+        """Rate limits are retried until `retry_window` seconds have passed (they clear on their
+        own); other failures (5xx, timeouts, network) count against max_retries + #providers."""
+        call = _CallState()
+        last: LLMError | None = None
+        failures_left = self.config.max_retries + len(self._states)
+        deadline = time.monotonic() + self.config.retry_window
+        while failures_left > 0:
+            state, wait = self._pick(call)
+            if state is None:
+                break
             try:
-                return self._request(system, user, want_json, max_tokens)
-            except httpx.TimeoutException as exc:
-                last = LLMTimeoutError(detail=repr(exc))
-                delay = 2.0 * (attempt + 1)
-            except httpx.TransportError as exc:
-                last = LLMError(
-                    "Could not reach the AI service. Check LLM_BASE_URL and your network connection.",
-                    detail=repr(exc),
-                )
-                delay = 2.0 * (attempt + 1)
-            except _Retryable as exc:
-                last, delay = exc.error, exc.delay
-            except LLMError:
-                raise
-            if attempt < cfg.max_retries:
-                log.info("LLM call failed (%s); retrying in %.1fs", type(last).__name__, delay)
-                time.sleep(delay)
-        assert last is not None
+                return self._attempt(state, wait, deadline, last, system, user, want_json, max_tokens)
+            except _GiveUp:
+                break
+            except _Retry as r:
+                last = r.error
+                failures_left -= r.cost
+                if r.truncated and max_tokens < MAX_OUTPUT_CAP:
+                    # Reasoning models spend part of the budget thinking: give them more room.
+                    max_tokens = min(max_tokens * 2, MAX_OUTPUT_CAP)
+                    log.info("%s: output cut off; retrying with max_tokens=%d", state.cfg.name, max_tokens)
+                    continue
+                if r.skip:
+                    call.skipped.add(state.cfg.name)
+                if r.failed:
+                    call.failed.add(state.cfg.name)
+            finally:
+                with self._lock:
+                    state.in_flight -= 1
+        if last is None:
+            last = LLMConfigError("No AI provider is available (all were disabled).")
         raise last
 
-    def _request(self, system: str, user: str, want_json: bool, max_tokens: int) -> str:
-        cfg = self.config
-        if cfg.provider == "anthropic":
-            url = f"{cfg.base_url}/v1/messages"
-            headers = {"x-api-key": cfg.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    def _attempt(self, state: _ProviderState, wait: float, deadline: float, last: LLMError | None,
+                 system: str, user: str, want_json: bool, max_tokens: int) -> str:
+        """One attempt on one provider. Raises _Retry (try again) or _GiveUp (stop now)."""
+        if time.monotonic() + wait > deadline and isinstance(last, LLMRateLimitError):
+            raise _GiveUp()
+        if wait > 0:
+            log.info("All providers cooling down; waiting %.1fs for %s", wait, state.cfg.name)
+            time.sleep(min(wait, MAX_WAIT_SECONDS))
+        name = state.cfg.name
+        try:
+            text = self._request(state, system, user, want_json, max_tokens)
+        except _RateLimited as exc:
+            self._cool(state, max(exc.delay, MIN_RATE_LIMIT_COOLDOWN), "rate limited")
+            raise _Retry(exc.error, failed=True)
+        except _Transient as exc:
+            self._cool(state, exc.delay, "temporary error")
+            raise _Retry(exc.error, cost=1, failed=True)
+        except _TooLarge as exc:
+            if exc.truncated:
+                raise _Retry(exc.error, cost=1, truncated=True)
+            log.info("%s: %s; trying the next provider", name, exc.error.detail[:80] or "request too large")
+            raise _Retry(exc.error, skip=True)
+        except LLMConfigError as exc:
+            with self._lock:
+                state.disabled = exc
+            log.warning("%s disabled: %s | %s", name, exc.user_message, exc.detail[:200])
+            if len(self._states) == 1:
+                raise
+            raise _Retry(exc)
+        except httpx.TimeoutException as exc:
+            self._cool(state, 5.0, "timeout")
+            raise _Retry(LLMTimeoutError(detail=f"{name}: {exc!r}"), cost=1, failed=True)
+        except httpx.TransportError as exc:
+            self._cool(state, 2.0, "network error")
+            raise _Retry(LLMError(
+                "Could not reach the AI service. Check the provider base URL and the network connection.",
+                detail=f"{name}: {exc!r}"), cost=1, failed=True)
+        with self._lock:
+            state.calls += 1
+            self._used[name] = self._used.get(name, 0) + 1
+        return text
+
+    def _cool(self, state: _ProviderState, delay: float, why: str) -> None:
+        with self._lock:
+            state.cooldown_until = time.monotonic() + delay
+        log.info("%s %s; cooling down %.1fs", state.cfg.name, why, delay)
+
+    # ---------------------------------------------------------------- one HTTP call
+    def _request(self, state: _ProviderState, system: str, user: str, want_json: bool, max_tokens: int) -> str:
+        p = state.cfg
+        if p.protocol == "anthropic":
+            url = f"{p.base_url}/v1/messages"
+            headers = {"x-api-key": p.api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
             body = {
-                "model": cfg.model,
+                "model": p.model,
                 "max_tokens": max_tokens,
                 "temperature": 0.1,
                 "system": system,
                 "messages": [{"role": "user", "content": user}],
             }
         else:
-            url = f"{cfg.base_url}/chat/completions"
-            headers = {"Authorization": f"Bearer {cfg.api_key}", "content-type": "application/json"}
+            url = f"{p.base_url}/chat/completions"
+            headers = {"Authorization": f"Bearer {p.api_key}", "content-type": "application/json"}
+            if p.name == "openrouter":
+                headers["X-Title"] = "ResearchOS"
             body = {
-                "model": cfg.model,
+                "model": p.model,
                 "temperature": 0.1,
                 "max_tokens": max_tokens,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             }
-            if want_json and self._json_mode:
+            if want_json and state.json_mode:
                 body["response_format"] = {"type": "json_object"}
 
         resp = self._http.post(url, headers=headers, json=body)
 
-        if resp.status_code == 400 and "response_format" in body:
-            # Some OpenAI-compatible servers reject response_format; remember and retry without it.
-            self._json_mode = False
+        if resp.status_code in (400, 422) and "response_format" in body:
+            # Some OpenAI-compatible servers/models reject response_format; remember and retry without it.
+            state.json_mode = False
             body.pop("response_format")
             resp = self._http.post(url, headers=headers, json=body)
 
-        if resp.status_code in (401, 403):
+        status, text = resp.status_code, resp.text[:400]
+        if status in (401, 403):
             raise LLMConfigError(
-                "The AI service rejected the API key (authentication failed). Check LLM_API_KEY.",
-                detail=resp.text[:300],
+                f"The AI provider '{p.name}' rejected the API key. Check {p.key_env}.", detail=text
             )
-        if resp.status_code == 404:
+        if status == 402:
+            raise LLMConfigError(f"The AI provider '{p.name}' has no credit left for this key.", detail=text)
+        if status == 404:
             raise LLMConfigError(
-                "The AI service endpoint or model was not found. Check LLM_BASE_URL and LLM_MODEL.",
-                detail=resp.text[:300],
+                f"The AI provider '{p.name}' does not offer model '{p.model}' (or the base URL is wrong).",
+                detail=text,
             )
-        if resp.status_code == 429:
-            retry_after = resp.headers.get("retry-after", "")
-            hint = re.search(r"try again in (?:(\d+)m)?\s*([\d.]+)s", resp.text)      # e.g. Groq: "try again in 23.49s"
-            if retry_after.replace(".", "", 1).isdigit():
-                delay = float(retry_after)
-            elif hint:
-                delay = float(hint.group(1) or 0) * 60 + float(hint.group(2)) + 1.0
-            else:
-                delay = 5.0
-            raise _Retryable(
+        if status == 413 or (status == 400 and "too large" in text.lower()):
+            raise _TooLarge(
+                LLMError(
+                    f"The request is too large for the '{p.name}' plan. Lower CHUNK_CHARS / SINGLE_PASS_CHARS "
+                    "/ NOTES_BUDGET_CHARS, or add another provider.",
+                    detail=text,
+                )
+            )
+        if status == 429:
+            raise _RateLimited(
                 LLMRateLimitError(
-                    "The AI service is rate limiting requests (likely a tokens-per-minute cap on your plan). "
-                    "Wait a minute and retry. If it keeps happening, set LLM_CONCURRENCY=1 and lower "
-                    "CHUNK_CHARS / SINGLE_PASS_CHARS / NOTES_BUDGET_CHARS so each request is smaller.",
-                    detail=resp.text[:300],
+                    "The AI providers are rate limiting requests. Wait a minute and retry, or add another "
+                    "provider (GROQ_API_KEY, OPENROUTER_API_KEY, NVIDIA_API_KEY).",
+                    detail=f"{p.name}: {text}",
                 ),
-                min(delay, 65.0),
+                _retry_delay(resp),
             )
-        if resp.status_code >= 500:
-            raise _Retryable(LLMError("The AI service had a temporary error.", detail=f"{resp.status_code} {resp.text[:300]}"), 3.0)
-        if resp.status_code >= 400:
-            raise LLMError(
-                f"The AI service rejected the request (HTTP {resp.status_code}).",
-                detail=resp.text[:500],
-            )
+        if status >= 500:
+            raise _Transient(LLMError("The AI service had a temporary error.", detail=f"{p.name} {status} {text}"))
+        if status >= 400:
+            raise LLMError(f"The AI provider '{p.name}' rejected the request (HTTP {status}).", detail=text)
 
         try:
             payload = resp.json()
-            if cfg.provider == "anthropic":
-                text = "".join(b.get("text", "") for b in payload["content"] if b.get("type") == "text")
+            if p.protocol == "anthropic":
+                content = "".join(b.get("text", "") for b in payload["content"] if b.get("type") == "text")
+                truncated = payload.get("stop_reason") == "max_tokens"
             else:
-                text = payload["choices"][0]["message"]["content"]
-        except (ValueError, KeyError, IndexError, TypeError) as exc:
-            raise LLMResponseError(detail=f"unexpected payload: {resp.text[:300]}") from exc
-        if not text or not text.strip():
-            raise LLMResponseError("The AI service returned an empty response.")
-        return text
+                choice = payload["choices"][0]
+                content = choice["message"].get("content") or ""
+                truncated = choice.get("finish_reason") == "length"
+        except (ValueError, KeyError, IndexError, TypeError):
+            raise _Transient(LLMResponseError(detail=f"{p.name}: unexpected payload {text}"), 1.0)
+        if truncated and want_json:
+            # Cut-off JSON cannot be repaired; another model may be less verbose.
+            raise _TooLarge(LLMResponseError(
+                "The AI response was cut off before it was complete. Try again, or raise LLM_MAX_OUTPUT_TOKENS.",
+                detail=f"output truncated at {max_tokens} tokens"), truncated=True)
+        if not content.strip():
+            raise _Transient(LLMResponseError("The AI service returned an empty response.", detail=p.name), 1.0)
+        return content
 
     def close(self) -> None:
-        self._http.close()
+        if self._own_pool:
+            self._pool.close()
 
 
-class _Retryable(Exception):
-    def __init__(self, error: LLMError, delay: float):
-        self.error, self.delay = error, delay
+def _retry_delay(resp: httpx.Response) -> float:
+    """Seconds to wait before this provider is usable again (Retry-After or the provider's hint)."""
+    retry_after = resp.headers.get("retry-after", "")
+    if retry_after.replace(".", "", 1).isdigit():
+        return min(float(retry_after), MAX_WAIT_SECONDS)
+    # Groq style: "try again in 23.49s", "try again in 1m5.2s", "try again in 520ms"
+    hint = re.search(r"try again in (?:(\d+)m(?!s))?\s*([\d.]+)(ms|s)", resp.text)
+    if hint:
+        seconds = float(hint.group(2)) / (1000 if hint.group(3) == "ms" else 1)
+        return min(float(hint.group(1) or 0) * 60 + seconds + 0.5, MAX_WAIT_SECONDS)
+    return 10.0

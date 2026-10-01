@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from pdf_analyst.utils.config import Limits
+from researchos.utils.config import Limits
 
 from .pdf_factory import make_pdf
 
@@ -48,6 +48,10 @@ def limits() -> Limits:
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for var in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_PROVIDER"):
+    for var in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_PROVIDER", "LLM_PROVIDERS"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr("pdf_analyst.llm.client.time.sleep", lambda s: None)   # no real retry back-off in tests
+    for name in ("GROQ", "OPENROUTER", "NVIDIA", "OPENAI", "ANTHROPIC"):
+        for suffix in ("_API_KEY", "_MODEL", "_BASE_URL"):
+            monkeypatch.delenv(name + suffix, raising=False)
+    monkeypatch.setenv("OCR_MODE", "off")      # tests must not depend on a local Tesseract install
+    monkeypatch.setattr("researchos.llm.client.time.sleep", lambda s: None)   # no real retry back-off in tests
