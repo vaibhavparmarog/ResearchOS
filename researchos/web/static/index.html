@@ -4,63 +4,106 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ResearchOS</title>
-  <meta name="description" content="Upload any PDF and get a grounded, page-referenced AI analysis.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%234f46e5'/%3E%3Cpath d='M10 8h8l5 5v11a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z' fill='white'/%3E%3C/svg%3E">
+  <meta name="description" content="Upload any PDF and get a grounded, page-referenced AI analysis. Nothing is stored.">
+  <meta name="theme-color" content="#4f46e5">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236366f1'/%3E%3Cstop offset='1' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M10 9h8l4 4v10a1 1 0 0 1-1 1H10a1 1 0 0 1-1-1V10a1 1 0 0 1 1-1z' fill='white'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/static/styles.css">
   <script src="/static/app.js" defer></script>
 </head>
 <body>
+  <svg width="0" height="0" class="sprite" aria-hidden="true">
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M5 20h14"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 5 5 9-10"/></symbol>
+    <symbol id="i-quote" viewBox="0 0 24 24"><path d="M9 7H5v6h4l-2 4"/><path d="M19 7h-4v6h4l-2 4"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6-5.3-6-11a6 6 0 0 1 12 0c0 5.7-6 11-6 11z"/><circle cx="12" cy="10" r="2"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  </svg>
+
   <header class="top">
     <div class="wrap top-inner">
-      <div class="brand"><span class="logo" aria-hidden="true"></span>ResearchOS</div>
-      <span class="version" id="version"></span>
+      <a class="brand" href="/" aria-label="ResearchOS home"><span class="logo" aria-hidden="true"></span><span>Research<b>OS</b></span></a>
+      <div class="top-right">
+        <span class="pill privacy"><svg class="ic"><use href="#i-lock"/></svg>Nothing stored</span>
+        <span class="pill" id="version"></span>
+      </div>
     </div>
   </header>
 
-  <main class="wrap">
+  <main>
     <section class="hero" id="hero">
-      <h1>Analyse any PDF</h1>
-      <p class="lead">Upload a paper, report or manual. The report is generated from that document only, with page references and quotes checked against the PDF.</p>
+      <div class="wrap">
+        <p class="eyebrow">AI research analyst</p>
+        <h1>Understand any paper <span class="grad">in minutes</span></h1>
+        <p class="lead">Upload a PDF. ResearchOS reads it page by page and writes a structured report. Every quote, number and page reference is checked against your document.</p>
+        <ul class="features">
+          <li><svg class="ic"><use href="#i-pin"/></svg>Page-cited findings</li>
+          <li><svg class="ic"><use href="#i-quote"/></svg>Quotes verified in the PDF</li>
+          <li><svg class="ic"><use href="#i-lock"/></svg>Deleted right after delivery</li>
+        </ul>
+      </div>
     </section>
 
-    <div class="banner warn" id="config-banner" hidden></div>
+    <div class="wrap">
+      <div class="banner warn" id="config-banner" hidden></div>
 
-    <section id="upload-view">
-      <label class="drop" id="drop" tabindex="0">
-        <input type="file" id="file" accept="application/pdf,.pdf" hidden>
-        <span class="drop-icon" aria-hidden="true"></span>
-        <span class="drop-title">Drop a PDF here or <u>browse</u></span>
-        <span class="drop-hint" id="limits-hint">PDF only</span>
-      </label>
-      <div class="banner error" id="upload-error" hidden></div>
-    </section>
+      <section id="upload-view">
+        <label class="drop" id="drop" tabindex="0">
+          <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+          <span class="drop-art" aria-hidden="true"><svg class="ic xl"><use href="#i-upload"/></svg></span>
+          <span class="drop-title">Drop your PDF here</span>
+          <span class="drop-sub">or <span class="link">choose a file</span></span>
+          <span class="drop-hint" id="limits-hint">PDF only</span>
+        </label>
+        <div class="banner error" id="upload-error" hidden></div>
+      </section>
 
-    <section id="job-view" hidden>
-      <div class="card file-card">
-        <div class="file-main">
-          <div class="file-name" id="f-name"></div>
-          <div class="file-facts" id="f-facts"></div>
+      <section id="job-view" hidden>
+        <div class="card file-card">
+          <span class="file-icon" aria-hidden="true"><svg class="ic"><use href="#i-file"/></svg></span>
+          <div class="file-main">
+            <div class="file-name" id="f-name"></div>
+            <div class="file-facts" id="f-facts"></div>
+          </div>
+          <div class="file-actions">
+            <button class="btn ghost danger" id="cancel" type="button"><svg class="ic"><use href="#i-x"/></svg>Cancel</button>
+            <button class="btn ghost" id="another" type="button" hidden><svg class="ic"><use href="#i-plus"/></svg>New PDF</button>
+          </div>
         </div>
-        <button class="btn secondary" id="another" type="button">Upload another PDF</button>
-      </div>
-      <div id="doc-warnings"></div>
+        <div id="doc-warnings"></div>
 
-      <div class="card progress-card" id="progress-card">
-        <div class="progress-row"><span id="p-msg">Uploading</span><span id="p-pct">0%</span></div>
-        <div class="bar"><div class="bar-fill" id="p-bar"></div></div>
-      </div>
+        <div class="card progress-card" id="progress-card">
+          <ol class="steps" id="steps">
+            <li data-step="0"><span class="dot"></span>Upload</li>
+            <li data-step="1"><span class="dot"></span>Read</li>
+            <li data-step="2"><span class="dot"></span>Analyse</li>
+            <li data-step="3"><span class="dot"></span>Verify</li>
+          </ol>
+          <div class="bar"><div class="bar-fill" id="p-bar"></div></div>
+          <div class="progress-row"><span id="p-msg">Uploading</span><span id="p-time"></span></div>
+        </div>
 
-      <div class="banner error" id="job-error" hidden>
-        <div id="job-error-text"></div>
-        <button class="btn" id="retry" type="button">Try again</button>
-      </div>
+        <div class="banner error" id="job-error" hidden>
+          <div id="job-error-text"></div>
+          <button class="btn" id="retry" type="button">Try again</button>
+        </div>
 
-      <article id="report" hidden></article>
-    </section>
+        <div class="report-layout" id="report-layout" hidden>
+          <nav class="toc" id="toc" aria-label="Report sections"></nav>
+          <article id="report"></article>
+        </div>
+      </section>
+    </div>
   </main>
 
-  <footer class="wrap foot">
-    Reports are generated by an AI model from the uploaded file. Sections marked <em>AI interpretation</em> are not statements by the document.
+  <footer class="foot">
+    <div class="wrap">
+      Reports are written by AI from the uploaded file only. Sections labelled <em>AI interpretation</em> are not statements by the document.
+      Your PDF and report are held in memory only while they are being processed and are deleted right after delivery.
+    </div>
   </footer>
 </body>
 </html>
