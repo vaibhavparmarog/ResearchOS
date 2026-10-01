@@ -2,10 +2,10 @@
 
 import pytest
 
-from pdf_analyst.pdf.chunker import chunk_document
-from pdf_analyst.pdf.extractor import extract_pdf
-from pdf_analyst.utils.config import Limits
-from pdf_analyst.utils.errors import (
+from researchos.pdf.chunker import chunk_document
+from researchos.pdf.extractor import extract_pdf
+from researchos.utils.config import Limits
+from researchos.utils.errors import (
     CorruptPDFError,
     EmptyPDFError,
     FileTooLargeError,
@@ -121,7 +121,7 @@ def test_encrypted_pdf(limits):
     doc = pymupdf.open()
     doc.new_page().insert_text((72, 72), "secret text here")
     data = doc.tobytes(encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="pw", owner_pw="pw")
-    from pdf_analyst.utils.errors import EncryptedPDFError
+    from researchos.utils.errors import EncryptedPDFError
 
     with pytest.raises(EncryptedPDFError):
         extract_pdf(data, "locked.pdf", limits)

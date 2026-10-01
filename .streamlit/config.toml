@@ -1,6 +1,0 @@
-[server]
-maxUploadSize = 25          # MB; keep >= MAX_PDF_MB (the app also enforces MAX_PDF_MB with a friendly message)
-headless = true
-
-[browser]
-gatherUsageStats = false

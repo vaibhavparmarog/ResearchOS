@@ -72,8 +72,8 @@ def chunk_document(doc: ExtractedDocument, limits: Limits | None = None) -> list
             chunks.append(Chunk(len(chunks), cur_pages, "\n\n".join(cur_parts)))
         cur_pages, cur_parts, cur_len = [], [], 0
 
-    for page in doc.text_pages:
-        for piece in _split_long(page.text, max_chars):
+    for page in doc.analysis_pages:
+        for piece in _split_long(page.for_analysis, max_chars):
             block = f"{page_marker(page.number)}\n{piece}"
             if cur_parts and cur_len + len(block) > max_chars:
                 flush()
@@ -87,4 +87,8 @@ def chunk_document(doc: ExtractedDocument, limits: Limits | None = None) -> list
 
 def full_text(doc: ExtractedDocument) -> str:
     """Whole document with page markers (used for single-pass analysis of short documents)."""
-    return "\n\n".join(f"{page_marker(p.number)}\n{p.text}" for p in doc.text_pages)
+    return "\n\n".join(f"{page_marker(p.number)}\n{p.for_analysis}" for p in doc.analysis_pages)
+
+
+def analysis_chars(doc: ExtractedDocument) -> int:
+    return sum(len(p.for_analysis) for p in doc.analysis_pages)
