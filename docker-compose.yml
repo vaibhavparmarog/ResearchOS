@@ -1,0 +1,23 @@
+services:
+  researchos:
+    build: .
+    image: researchos:latest
+    container_name: researchos
+    restart: unless-stopped
+    env_file: .env                 # secrets live only on the server, never in git or the image
+    ports:
+      - "127.0.0.1:8000:8000"      # only reachable through the nginx reverse proxy on the host
+    # Sized for a 2 GB instance: the app idles at ~150 MB; OCR/large PDFs need headroom.
+    mem_limit: 1200m
+    pids_limit: 256
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m             # upload spooling; nothing else is written
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      - JOB_WORKERS=2
+      - OMP_THREAD_LIMIT=1         # one Tesseract thread per OCR page: predictable memory on small hosts
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

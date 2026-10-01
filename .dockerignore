@@ -1,0 +1,13 @@
+# Never send secrets or local clutter into the image build context.
+.env
+.env.*
+!.env.example
+.git
+**/__pycache__
+**/*.pyc
+.pytest_cache
+tests
+docs
+deploy
+*.md
+codebase_guide.md
