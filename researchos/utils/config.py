@@ -153,8 +153,8 @@ class LLMConfig:
 class Limits:
     max_pdf_mb: int = 25
     max_pages: int = 300
-    chunk_chars: int = 20000          # target size of one map-stage chunk (fewer LLM calls = faster)
-    single_pass_chars: int = 40000    # documents up to this size skip map-reduce
+    chunk_chars: int = 30000          # target size of one map-stage chunk (fewer LLM calls = faster)
+    single_pass_chars: int = 100000   # documents up to this size skip map-reduce (1 LLM call vs 20+)
     notes_budget_chars: int = 45000   # max size of the notes handed to the final synthesis (fewer reduce rounds)
     max_ocr_pages: int = 60           # cap on pages OCR'd per document (OCR is ~1-2 s/page)
     skip_references: bool = True      # keep the bibliography out of the LLM input
