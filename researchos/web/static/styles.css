@@ -198,3 +198,5 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 Int
 [data-theme="dark"] .theme-btn .moon { display: block; }
 .made-by { text-align: center; margin-top: 24px; font-size: 12px; color: var(--faint); }
 .made-by b { font-weight: 600; color: var(--muted); }
+.made-by a { color: inherit; text-decoration: none; }
+.made-by a:hover { text-decoration: underline; }
