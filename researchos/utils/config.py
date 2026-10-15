@@ -105,7 +105,7 @@ class LLMConfig:
     timeout: float = 120.0
     max_retries: int = 5
     max_output_tokens: int = 6000
-    concurrency: int = 3
+    concurrency: int = 9          # 3 providers x 3 parallel calls each
     json_mode: bool = True
     retry_window: float = 240.0     # seconds a single call may keep waiting out rate limits
     hedge_after: float = 0.0        # >0: duplicate a slow call on another provider after N seconds
@@ -142,7 +142,7 @@ class LLMConfig:
             max_retries=_int("LLM_MAX_RETRIES", 5),
             max_output_tokens=_int("LLM_MAX_OUTPUT_TOKENS", 6000),
             # default: one parallel request per provider/model slot (each has its own rate limit)
-            concurrency=max(1, _int("LLM_CONCURRENCY", max(3, len(providers)))),
+            concurrency=max(1, _int("LLM_CONCURRENCY", max(9, len(providers) * 3))),
             json_mode=os.environ.get("LLM_JSON_MODE", "true").strip().lower() not in ("0", "false", "no"),
             retry_window=_float("LLM_RETRY_WINDOW", 240.0),
             hedge_after=_float("LLM_HEDGE_AFTER", 25.0),
