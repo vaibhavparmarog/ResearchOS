@@ -184,4 +184,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 Int
   .steps li { font-size: 12.5px; }
   .privacy { display: none; }
   .file-actions { width: 100%; }
+  .btn { min-height: 44px; padding: 10px 16px; }
+  .toolbar .btn { flex: 1; justify-content: center; }
+  .drop { padding: 40px 16px; }
 }
