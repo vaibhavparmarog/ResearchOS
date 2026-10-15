@@ -22,7 +22,7 @@ from .validator import PageIndex, sanitize_notes
 
 StageProgress = Callable[[float, str], None]
 
-MAX_REDUCE_LEVELS = 6
+MAX_REDUCE_LEVELS = 3
 FINAL_MIN_OUTPUT_TOKENS = 8000
 
 
