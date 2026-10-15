@@ -57,6 +57,19 @@ async function loadConfig() {
   } catch (_) { /* the upload will surface any server problem */ }
 }
 
+function setupTheme() {
+  const root = document.documentElement;
+  const saved = localStorage.getItem("theme");
+  if (saved === "dark" || (!saved && matchMedia("(prefers-color-scheme: dark)").matches)) {
+    root.setAttribute("data-theme", "dark");
+  }
+  $("theme-toggle").addEventListener("click", () => {
+    const dark = root.getAttribute("data-theme") === "dark";
+    if (dark) { root.removeAttribute("data-theme"); localStorage.setItem("theme", "light"); }
+    else { root.setAttribute("data-theme", "dark"); localStorage.setItem("theme", "dark"); }
+  });
+}
+
 function setupEvents() {
   const drop = $("drop"), input = $("file");
   input.addEventListener("change", () => input.files[0] && start(input.files[0]));
@@ -338,4 +351,4 @@ function renderReport(r) {
   $("report-layout").hidden = false;
 }
 
-document.addEventListener("DOMContentLoaded", () => { setupEvents(); loadConfig(); });
+document.addEventListener("DOMContentLoaded", () => { setupTheme(); setupEvents(); loadConfig(); });

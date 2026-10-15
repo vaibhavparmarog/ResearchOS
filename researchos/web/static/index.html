@@ -21,6 +21,8 @@
     <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
     <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v12"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></symbol>
     <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
   </svg>
 
   <header class="top">
@@ -29,6 +31,10 @@
       <div class="top-right">
         <span class="pill privacy"><svg class="ic"><use href="#i-lock"/></svg>Nothing stored</span>
         <span class="pill" id="version"></span>
+        <button class="theme-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode">
+          <svg class="ic sun" aria-hidden="true"><use href="#i-sun"/></svg>
+          <svg class="ic moon" aria-hidden="true"><use href="#i-moon"/></svg>
+        </button>
       </div>
     </div>
   </header>
@@ -103,6 +109,7 @@
     <div class="wrap">
       Reports are written by AI from the uploaded file only. Sections labelled <em>AI interpretation</em> are not statements by the document.
       Your PDF and report are held in memory only while they are being processed and are deleted right after delivery.
+      <div class="made-by">Made by <b>Vaibhav</b></div>
     </div>
   </footer>
 </body>
